@@ -210,7 +210,18 @@ local function cancelTween()
 	if currentTween then
 		currentTween:Cancel()
 		currentTween = nil
-		isCurrentlyTeleporting = false
+	end
+	
+	-- Force stop any teleporting state
+	isCurrentlyTeleporting = false
+	
+	-- Additional safety: anchor the character briefly to stop all movement
+	local character = getCharacter()
+	local hrp = character and character:FindFirstChild('HumanoidRootPart')
+	if hrp then
+		hrp.Anchored = true
+		wait(0.1)
+		hrp.Anchored = false
 	end
 end
 
