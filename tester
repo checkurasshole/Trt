@@ -1,0 +1,367 @@
+-- ComboChronicle Vault Teleport Script
+-- Main script to be hosted on GitHub
+
+-- Variables
+local teleportSpeed = 16 -- Default speed
+local groundCheckEnabled = true -- Enable/disable ground checking
+local maxDropHeight = 100 -- Maximum height to consider "in air"
+local safeZoneTolerance = 15 -- Tolerance for safe zone detection
+local groundCheckConnection = nil -- For continuous ground checking
+local isCurrentlyTeleporting = false
+
+-- Ground reference points (your provided coordinates)
+local groundReferencePoints = {
+    Vector3.new(-410.751953, -35.4375076, 59.4064636),
+    Vector3.new(-434.66, -8.00, 201.72),
+    Vector3.new(-413.12, -7.50, 198.69),
+}
+
+-- Services
+local Players = game:GetService('Players')
+local LocalPlayer = Players.LocalPlayer
+local TweenService = game:GetService('TweenService')
+local PathfindingService = game:GetService('PathfindingService')
+local Workspace = game:GetService('Workspace')
+local Plots = Workspace:WaitForChild('Plots')
+local RunService = game:GetService('RunService')
+local UserInputService = game:GetService('UserInputService')
+
+-- Functions
+local function getCharacter()
+    if
+        LocalPlayer.Character
+        and LocalPlayer.Character:FindFirstChild('HumanoidRootPart')
+    then
+        return LocalPlayer.Character
+    end
+    return LocalPlayer.CharacterAdded:Wait()
+end
+
+local function findPlayerPlot()
+    for _, plot in ipairs(Plots:GetChildren()) do
+        local sign = plot:FindFirstChild('PlotSign')
+        local gui = sign and sign:FindFirstChild('SurfaceGui')
+        local frame = gui and gui:FindFirstChild('Frame')
+        local label = frame and frame:FindFirstChild('TextLabel')
+        if label and label.Text:lower():find(LocalPlayer.Name:lower()) then
+            return plot
+        end
+    end
+    return nil
+end
+
+-- Check if player is near any of the safe reference points
+local function isNearSafeZone(position, tolerance)
+    tolerance = tolerance or safeZoneTolerance -- Use global tolerance or default
+    
+    for _, refPoint in ipairs(groundReferencePoints) do
+        local distance = (position - refPoint).Magnitude
+        if distance <= tolerance then
+            return true, refPoint
+        end
+    end
+    
+    return false, nil
+end
+
+-- IMPROVED GROUND DETECTION - More tolerant for small height differences
+local function isOnGround()
+    local character = getCharacter()
+    local humanoidRootPart = character and character:FindFirstChild('HumanoidRootPart')
+    if not humanoidRootPart then
+        return true -- Default to true to avoid unnecessary drops
+    end
+
+    local rayOrigin = humanoidRootPart.Position
+    local rayDirection = Vector3.new(0, -6, 0) -- Increased to 6 studs for better detection
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+    local rayResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+    -- If we hit something, check if it's close enough to be considered "on ground"
+    if rayResult then
+        local distanceToGround = rayResult.Distance
+        -- Consider "on ground" if within 5 studs (more tolerant)
+        return distanceToGround <= 5
+    end
+
+    return false
+end
+
+-- Smart ground detection - only drop if actually floating
+local function findGroundBelow(position)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = { getCharacter() }
+
+    local rayDirection = Vector3.new(0, -maxDropHeight, 0)
+    local raycastResult = Workspace:Raycast(
+        position,
+        rayDirection,
+        raycastParams
+    )
+
+    if raycastResult then
+        return raycastResult.Position + Vector3.new(0, 5, 0) -- Add some offset above ground
+    end
+
+    -- If no ground found via raycast, use closest reference point
+    local closestRefPoint = groundReferencePoints[1]
+    local closestDistance = math.huge
+
+    for _, refPoint in ipairs(groundReferencePoints) do
+        local distance = (Vector3.new(position.X, 0, position.Z) - Vector3.new(
+            refPoint.X,
+            0,
+            refPoint.Z
+        )).Magnitude
+        if distance < closestDistance then
+            closestDistance = distance
+            closestRefPoint = refPoint
+        end
+    end
+
+    return Vector3.new(position.X, closestRefPoint.Y + 5, position.Z)
+end
+
+-- Smart ground checking - only consider off ground if floating AND above reference levels
+local function checkAndDropToGround()
+    if not groundCheckEnabled then
+        return
+    end
+
+    local character = getCharacter()
+    local hrp = character:FindFirstChild('HumanoidRootPart')
+    if not hrp then
+        return
+    end
+
+    local currentPos = hrp.Position
+    
+    -- Check if player is near any safe zone - if so, don't drop
+    local nearSafeZone, safePoint = isNearSafeZone(currentPos, 15)
+    if nearSafeZone then
+        print('Player is near safe zone at: ' .. tostring(safePoint) .. ' - No dropping needed')
+        return
+    end
+
+    -- Use the improved ground detection method
+    if isOnGround() then
+        return -- Don't drop if standing on something
+    end
+
+    -- Find closest reference point to compare height
+    local closestRefPoint = groundReferencePoints[1]
+    local closestDistance = math.huge
+
+    for _, refPoint in ipairs(groundReferencePoints) do
+        local distance = (
+            Vector3.new(currentPos.X, 0, currentPos.Z)
+            - Vector3.new(refPoint.X, 0, refPoint.Z)
+        ).Magnitude
+        if distance < closestDistance then
+            closestDistance = distance
+            closestRefPoint = refPoint
+        end
+    end
+
+    local heightAboveRef = currentPos.Y - closestRefPoint.Y
+
+    -- Only drop if significantly above reference ground AND not standing on anything AND not in air briefly
+    if heightAboveRef > 30 then -- Increased threshold from 20 to 30 studs
+        print('Character is floating in air! Dropping to ground...')
+
+        local groundPos = findGroundBelow(currentPos)
+        if groundPos then
+            local heightDifference = currentPos.Y - groundPos.Y
+            local dropDistance = heightDifference
+            local dropTime = math.min(dropDistance / 50, 2) -- Max 2 seconds drop time
+
+            local dropCFrame = CFrame.new(groundPos) * (hrp.CFrame - currentPos)
+            local dropTween = TweenService:Create(
+                hrp,
+                TweenInfo.new(
+                    dropTime,
+                    Enum.EasingStyle.Quad,
+                    Enum.EasingDirection.In,
+                    0,
+                    false,
+                    0
+                ),
+                { CFrame = dropCFrame }
+            )
+
+            dropTween:Play()
+            dropTween.Completed:Wait()
+            print('Dropped to ground successfully!')
+
+            -- Small delay to ensure character is stable
+            wait(0.5)
+        end
+    end
+end
+
+-- Continuous monitoring during teleport
+local function startGroundMonitoring()
+    if groundCheckConnection then
+        groundCheckConnection:Disconnect()
+    end
+
+    groundCheckConnection = RunService.Heartbeat:Connect(function()
+        if groundCheckEnabled and isCurrentlyTeleporting then
+            -- Only check every 10 frames to avoid spam
+            if tick() % 0.1 < 0.016 then
+                checkAndDropToGround()
+            end
+        end
+    end)
+end
+
+local function stopGroundMonitoring()
+    if groundCheckConnection then
+        groundCheckConnection:Disconnect()
+        groundCheckConnection = nil
+    end
+end
+
+-- ORIGINAL SAFE TELEPORT METHOD + SMART GROUND DETECTION
+local function tweenToPath(waypoints, speed)
+    local character = getCharacter()
+    local hrp = character:FindFirstChild('HumanoidRootPart')
+    if not hrp then
+        return
+    end
+
+    isCurrentlyTeleporting = true
+    startGroundMonitoring()
+
+    -- Check if character is in the air before starting teleport
+    checkAndDropToGround()
+
+    for _, waypoint in ipairs(waypoints) do
+        local plrpos = hrp.Position
+        local tppos = waypoint.Position
+        local tpposAdjusted = (tppos - Vector3.new(0, tppos.Y, 0))
+            + Vector3.new(0, plrpos.Y, 0)
+        local distance = (tpposAdjusted - plrpos).Magnitude
+        local t = distance / speed -- Use custom speed instead of WalkSpeed
+        local cfr = CFrame.new(tpposAdjusted) * (hrp.CFrame - plrpos)
+        local tween = TweenService:Create(
+            hrp,
+            TweenInfo.new(
+                t,
+                Enum.EasingStyle.Linear,
+                Enum.EasingDirection.Out,
+                0,
+                false,
+                0
+            ),
+            { CFrame = cfr }
+        )
+        tween:Play()
+        tween.Completed:Wait()
+
+        -- Check if character is in the air after each waypoint
+        checkAndDropToGround()
+    end
+
+    isCurrentlyTeleporting = false
+    stopGroundMonitoring()
+end
+
+-- ORIGINAL WORKING PATHFINDING FUNCTION - kept unchanged
+local function computePathTo(targetPos)
+    local character = getCharacter()
+    local hrp = character:FindFirstChild('HumanoidRootPart')
+    if not hrp then
+        return nil
+    end
+
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        Costs = {
+            NonPathableMaterial = math.huge,
+            InvisibleWalls = math.huge,
+            LaserHitbox = math.huge,
+        },
+    })
+
+    local success, errorMsg = pcall(function()
+        path:ComputeAsync(hrp.Position, targetPos)
+    end)
+
+    if not success or path.Status ~= Enum.PathStatus.Success then
+        return nil
+    end
+
+    return path:GetWaypoints()
+end
+
+-- ORIGINAL WORKING TELEPORT TO BASE FUNCTION - kept unchanged
+local function teleportToBase()
+    local plot = findPlayerPlot()
+    if not plot then
+        print('Could not find your plot!')
+        return
+    end
+
+    local purchases = plot:FindFirstChild('Purchases')
+    if not purchases then
+        print('Could not find Purchases in your plot!')
+        return
+    end
+
+    local plotBlock = purchases:FindFirstChild('PlotBlock')
+    if not plotBlock then
+        print('Could not find PlotBlock!')
+        return
+    end
+
+    local hitbox = plotBlock:FindFirstChild('Hitbox')
+    if not hitbox then
+        print('Could not find Hitbox!')
+        return
+    end
+
+    print('Teleporting to base with speed: ' .. teleportSpeed)
+    local waypoints = computePathTo(hitbox.Position)
+    if waypoints then
+        tweenToPath(waypoints, teleportSpeed)
+        print('Teleport completed!')
+    else
+        print('Could not compute path to base!')
+    end
+end
+
+-- Keybind for teleport to base (G key)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end -- Don't trigger if typing in chat or GUI
+    
+    if input.KeyCode == Enum.KeyCode.G then
+        print('G key pressed - Teleporting to base...')
+        teleportToBase()
+    end
+end)
+
+-- Export functions and variables for GUI access
+local TeleportModule = {}
+TeleportModule.teleportSpeed = teleportSpeed
+TeleportModule.setTeleportSpeed = function(speed)
+    teleportSpeed = speed
+end
+TeleportModule.teleportToBase = teleportToBase
+TeleportModule.checkAndDropToGround = checkAndDropToGround
+TeleportModule.stopGroundMonitoring = stopGroundMonitoring
+
+-- Cleanup when script ends
+game:GetService('Players').PlayerRemoving:Connect(function(player)
+    if player == LocalPlayer then
+        stopGroundMonitoring()
+    end
+end)
+
+return TeleportModule
