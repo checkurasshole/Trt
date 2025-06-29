@@ -8,6 +8,7 @@ local maxDropHeight = 100 -- Maximum height to consider "in air"
 local safeZoneTolerance = 15 -- Tolerance for safe zone detection
 local groundCheckConnection = nil -- For continuous ground checking
 local isCurrentlyTeleporting = false
+local currentTween = nil
 
 -- Ground reference points (your provided coordinates)
 local groundReferencePoints = {
@@ -90,6 +91,25 @@ local function isOnGround()
     return false
 end
 
+-- Check if there's a clear path between two points (no walls)
+local function hasLinearPath(startPos, endPos)
+    local character = getCharacter()
+    if not character then return false end
+    
+    local direction = (endPos - startPos).Unit
+    local distance = (endPos - startPos).Magnitude
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    -- Cast ray from start to end position
+    local rayResult = Workspace:Raycast(startPos, direction * distance, raycastParams)
+    
+    -- If we hit something, there's an obstacle
+    return rayResult == nil
+end
+
 -- Smart ground detection - only drop if actually floating
 local function findGroundBelow(position)
     local raycastParams = RaycastParams.new()
@@ -143,7 +163,6 @@ local function checkAndDropToGround()
     -- Check if player is near any safe zone - if so, don't drop
     local nearSafeZone, safePoint = isNearSafeZone(currentPos, 15)
     if nearSafeZone then
-        print('Player is near safe zone at: ' .. tostring(safePoint) .. ' - No dropping needed')
         return
     end
 
@@ -171,8 +190,6 @@ local function checkAndDropToGround()
 
     -- Only drop if significantly above reference ground AND not standing on anything AND not in air briefly
     if heightAboveRef > 30 then -- Increased threshold from 20 to 30 studs
-        print('Character is floating in air! Dropping to ground...')
-
         local groundPos = findGroundBelow(currentPos)
         if groundPos then
             local heightDifference = currentPos.Y - groundPos.Y
@@ -195,7 +212,6 @@ local function checkAndDropToGround()
 
             dropTween:Play()
             dropTween.Completed:Wait()
-            print('Dropped to ground successfully!')
 
             -- Small delay to ensure character is stable
             wait(0.5)
@@ -203,30 +219,98 @@ local function checkAndDropToGround()
     end
 end
 
--- Continuous monitoring during teleport
-local function startGroundMonitoring()
-    if groundCheckConnection then
-        groundCheckConnection:Disconnect()
+-- Cancel current tween
+local function cancelTween()
+    if currentTween then
+        currentTween:Cancel()
+        currentTween = nil
+    end
+    
+    -- Force stop any teleporting state
+    isCurrentlyTeleporting = false
+    
+    -- Additional safety: anchor the character briefly to stop all movement
+    local character = getCharacter()
+    local hrp = character and character:FindFirstChild('HumanoidRootPart')
+    if hrp then
+        hrp.Anchored = true
+        wait(0.1)
+        hrp.Anchored = false
+    end
+end
+
+-- IMPROVED PATHFINDING WITH COLLISION DETECTION
+local function computePathTo(targetPos)
+    local character = getCharacter()
+    local hrp = character:FindFirstChild('HumanoidRootPart')
+    if not hrp then
+        return nil
     end
 
-    groundCheckConnection = RunService.Heartbeat:Connect(function()
-        if groundCheckEnabled and isCurrentlyTeleporting then
-            -- Only check every 10 frames to avoid spam
-            if tick() % 0.1 < 0.016 then
-                checkAndDropToGround()
+    -- First check if we can go directly (no obstacles)
+    local startPos = hrp.Position
+    if hasLinearPath(startPos, targetPos) then
+        -- Direct path available, create simple waypoint
+        return {{Position = targetPos, Action = Enum.PathWaypointAction.Walk}}
+    end
+
+    -- Use pathfinding service with improved settings
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 3, -- Increased from 2 to avoid walls better
+        AgentHeight = 6, -- Increased from 5
+        AgentCanJump = true,
+        AgentCanClimb = false,
+        WaypointSpacing = 8, -- Increased spacing for smoother paths
+        Costs = {
+            Water = 20,
+            DangerousArea = math.huge,
+            NonPathableMaterial = math.huge,
+            InvisibleWalls = math.huge,
+            LaserHitbox = math.huge,
+        },
+    })
+
+    local success, errorMsg = pcall(function()
+        path:ComputeAsync(startPos, targetPos)
+    end)
+
+    if not success then
+        print("Path computation failed: " .. tostring(errorMsg))
+        return nil
+    end
+
+    if path.Status == Enum.PathStatus.Success then
+        local waypoints = path:GetWaypoints()
+        
+        -- Filter waypoints to avoid going through walls
+        local filteredWaypoints = {}
+        local lastValidPos = startPos
+        
+        for i, waypoint in ipairs(waypoints) do
+            if i == 1 then
+                -- Always include first waypoint
+                table.insert(filteredWaypoints, waypoint)
+                lastValidPos = waypoint.Position
+            else
+                -- Check if we can go directly from last valid position to this waypoint
+                if hasLinearPath(lastValidPos, waypoint.Position) then
+                    table.insert(filteredWaypoints, waypoint)
+                    lastValidPos = waypoint.Position
+                else
+                    -- Skip this waypoint if it would cause wall clipping
+                    print("Skipping waypoint that would clip through walls")
+                end
             end
         end
-    end)
-end
-
-local function stopGroundMonitoring()
-    if groundCheckConnection then
-        groundCheckConnection:Disconnect()
-        groundCheckConnection = nil
+        
+        return filteredWaypoints
+    else
+        print("Pathfinding failed with status: " .. tostring(path.Status))
+        return nil
     end
 end
 
--- ORIGINAL SAFE TELEPORT METHOD + SMART GROUND DETECTION
+-- IMPROVED TELEPORT WITH BETTER COLLISION HANDLING
 local function tweenToPath(waypoints, speed)
     local character = getCharacter()
     local hrp = character:FindFirstChild('HumanoidRootPart')
@@ -235,73 +319,57 @@ local function tweenToPath(waypoints, speed)
     end
 
     isCurrentlyTeleporting = true
-    startGroundMonitoring()
 
-    -- Check if character is in the air before starting teleport
-    checkAndDropToGround()
-
-    for _, waypoint in ipairs(waypoints) do
-        local plrpos = hrp.Position
-        local tppos = waypoint.Position
-        local tpposAdjusted = (tppos - Vector3.new(0, tppos.Y, 0))
-            + Vector3.new(0, plrpos.Y, 0)
-        local distance = (tpposAdjusted - plrpos).Magnitude
-        local t = distance / speed -- Use custom speed instead of WalkSpeed
-        local cfr = CFrame.new(tpposAdjusted) * (hrp.CFrame - plrpos)
-        local tween = TweenService:Create(
+    for i, waypoint in ipairs(waypoints) do
+        if not isCurrentlyTeleporting then
+            break -- Allow cancellation
+        end
+        
+        local startPos = hrp.Position
+        local targetPos = waypoint.Position
+        
+        -- Add some height to avoid ground clipping
+        local adjustedTarget = Vector3.new(targetPos.X, targetPos.Y + 2, targetPos.Z)
+        
+        -- Double-check for walls before moving
+        if not hasLinearPath(startPos, adjustedTarget) then
+            print("Obstacle detected, skipping waypoint " .. i)
+            continue
+        end
+        
+        local distance = (adjustedTarget - startPos).Magnitude
+        local moveTime = distance / speed
+        
+        local targetCFrame = CFrame.new(adjustedTarget) * (hrp.CFrame - startPos)
+        
+        currentTween = TweenService:Create(
             hrp,
             TweenInfo.new(
-                t,
+                moveTime,
                 Enum.EasingStyle.Linear,
                 Enum.EasingDirection.Out,
                 0,
                 false,
                 0
             ),
-            { CFrame = cfr }
+            { CFrame = targetCFrame }
         )
-        tween:Play()
-        tween.Completed:Wait()
-
-        -- Check if character is in the air after each waypoint
-        checkAndDropToGround()
+        
+        currentTween:Play()
+        currentTween.Completed:Wait()
+        
+        -- Small pause between waypoints for stability
+        wait(0.1)
     end
 
     isCurrentlyTeleporting = false
-    stopGroundMonitoring()
+    currentTween = nil
+    
+    -- Final ground check
+    checkAndDropToGround()
 end
 
--- ORIGINAL WORKING PATHFINDING FUNCTION - kept unchanged
-local function computePathTo(targetPos)
-    local character = getCharacter()
-    local hrp = character:FindFirstChild('HumanoidRootPart')
-    if not hrp then
-        return nil
-    end
-
-    local path = PathfindingService:CreatePath({
-        AgentRadius = 2,
-        AgentHeight = 5,
-        AgentCanJump = true,
-        Costs = {
-            NonPathableMaterial = math.huge,
-            InvisibleWalls = math.huge,
-            LaserHitbox = math.huge,
-        },
-    })
-
-    local success, errorMsg = pcall(function()
-        path:ComputeAsync(hrp.Position, targetPos)
-    end)
-
-    if not success or path.Status ~= Enum.PathStatus.Success then
-        return nil
-    end
-
-    return path:GetWaypoints()
-end
-
--- ORIGINAL WORKING TELEPORT TO BASE FUNCTION - kept unchanged
+-- TELEPORT TO BASE WITH IMPROVED PATHFINDING
 local function teleportToBase()
     local plot = findPlayerPlot()
     if not plot then
@@ -329,23 +397,13 @@ local function teleportToBase()
 
     print('Teleporting to base with speed: ' .. teleportSpeed)
     local waypoints = computePathTo(hitbox.Position)
-    if waypoints then
+    if waypoints and #waypoints > 0 then
         tweenToPath(waypoints, teleportSpeed)
         print('Teleport completed!')
     else
-        print('Could not compute path to base!')
+        print('Could not compute safe path to base!')
     end
 end
-
--- Keybind for teleport to base (G key)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end -- Don't trigger if typing in chat or GUI
-    
-    if input.KeyCode == Enum.KeyCode.G then
-        print('G key pressed - Teleporting to base...')
-        teleportToBase()
-    end
-end)
 
 -- Export functions and variables for GUI access
 local TeleportModule = {}
@@ -355,13 +413,6 @@ TeleportModule.setTeleportSpeed = function(speed)
 end
 TeleportModule.teleportToBase = teleportToBase
 TeleportModule.checkAndDropToGround = checkAndDropToGround
-TeleportModule.stopGroundMonitoring = stopGroundMonitoring
-
--- Cleanup when script ends
-game:GetService('Players').PlayerRemoving:Connect(function(player)
-    if player == LocalPlayer then
-        stopGroundMonitoring()
-    end
-end)
+TeleportModule.cancelTween = cancelTween
 
 return TeleportModule
