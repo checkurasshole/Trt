@@ -1,0 +1,327 @@
+-- ComboChronicle Vault Teleport Script
+-- Main functionality script
+
+-- Variables
+local teleportSpeed = 49
+local groundCheckEnabled = true
+local safeZoneTolerance = 15
+local SKY_HEIGHT = 200
+local currentTween = nil
+local isCurrentlyTeleporting = false
+
+-- Ground reference points
+local groundReferencePoints = {
+	Vector3.new(-410.751953, -35.4375076, 59.4064636),
+	Vector3.new(-434.66, -8.00, 201.72),
+	Vector3.new(-413.12, -7.50, 198.69),
+}
+
+-- Services
+local Players = game:GetService('Players')
+local LocalPlayer = Players.LocalPlayer
+local TweenService = game:GetService('TweenService')
+local PathfindingService = game:GetService('PathfindingService')
+local Workspace = game:GetService('Workspace')
+local Plots = Workspace:WaitForChild('Plots')
+local UserInputService = game:GetService('UserInputService')
+
+-- Functions
+local function getCharacter()
+	if
+		LocalPlayer.Character
+		and LocalPlayer.Character:FindFirstChild('HumanoidRootPart')
+	then
+		return LocalPlayer.Character
+	end
+	return LocalPlayer.CharacterAdded:Wait()
+end
+
+local function findPlayerPlot()
+	for _, plot in ipairs(Plots:GetChildren()) do
+		local sign = plot:FindFirstChild('PlotSign')
+		local gui = sign and sign:FindFirstChild('SurfaceGui')
+		local frame = gui and gui:FindFirstChild('Frame')
+		local label = frame and frame:FindFirstChild('TextLabel')
+		if label and label.Text:lower():find(LocalPlayer.Name:lower()) then
+			return plot
+		end
+	end
+	return nil
+end
+
+local function isNearSafeZone(position)
+	for _, refPoint in ipairs(groundReferencePoints) do
+		local distance = (position - refPoint).Magnitude
+		if distance <= safeZoneTolerance then
+			return true
+		end
+	end
+	return false
+end
+
+local function isOnGround()
+	local character = getCharacter()
+	local humanoidRootPart = character
+		and character:FindFirstChild('HumanoidRootPart')
+	if not humanoidRootPart then
+		return true
+	end
+
+	local rayOrigin = humanoidRootPart.Position
+	local rayDirection = Vector3.new(0, -6, 0)
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = { character }
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+	local rayResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+	if rayResult then
+		local distanceToGround = rayResult.Distance
+		return distanceToGround <= 5
+	end
+
+	return false
+end
+
+local function checkAndDropToGround()
+	if not groundCheckEnabled then
+		return
+	end
+
+	local character = getCharacter()
+	local hrp = character:FindFirstChild('HumanoidRootPart')
+	if not hrp then
+		return
+	end
+
+	local currentPos = hrp.Position
+
+	if isNearSafeZone(currentPos) then
+		return
+	end
+
+	if isOnGround() then
+		return
+	end
+
+	local closestRefPoint = groundReferencePoints[1]
+	local closestDistance = math.huge
+
+	for _, refPoint in ipairs(groundReferencePoints) do
+		local distance = (
+			Vector3.new(currentPos.X, 0, currentPos.Z)
+			- Vector3.new(refPoint.X, 0, refPoint.Z)
+		).Magnitude
+		if distance < closestDistance then
+			closestDistance = distance
+			closestRefPoint = refPoint
+		end
+	end
+
+	local heightAboveRef = currentPos.Y - closestRefPoint.Y
+
+	if heightAboveRef > 30 then
+		local groundPos = Vector3.new(
+			currentPos.X,
+			closestRefPoint.Y + 5,
+			currentPos.Z
+		)
+		local dropCFrame = CFrame.new(groundPos) * (hrp.CFrame - currentPos)
+		local dropTween = TweenService:Create(
+			hrp,
+			TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ CFrame = dropCFrame }
+		)
+		dropTween:Play()
+		dropTween.Completed:Wait()
+		wait(0.5)
+	end
+end
+
+-- SKY TELEPORT - Goes straight up to sky height
+local function teleportToSky()
+	local character = getCharacter()
+	local hrp = character:FindFirstChild('HumanoidRootPart')
+	if not hrp then
+		return
+	end
+
+	if currentTween then
+		currentTween:Cancel()
+	end
+
+	isCurrentlyTeleporting = true
+	local currentPos = hrp.Position
+	local skyPos = Vector3.new(currentPos.X, SKY_HEIGHT, currentPos.Z)
+	local distance = (skyPos - currentPos).Magnitude
+	local t = distance / teleportSpeed
+
+	local cfr = CFrame.new(skyPos) * (hrp.CFrame - currentPos)
+	currentTween = TweenService:Create(
+		hrp,
+		TweenInfo.new(t, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+		{ CFrame = cfr }
+	)
+
+	currentTween:Play()
+	currentTween.Completed:Connect(function()
+		isCurrentlyTeleporting = false
+		currentTween = nil
+	end)
+end
+
+-- TWEEN DOWN - Tweens down for 4 seconds then lets you drop
+local function tweenDown()
+	local character = getCharacter()
+	local hrp = character:FindFirstChild('HumanoidRootPart')
+	if not hrp then
+		return
+	end
+
+	if currentTween then
+		currentTween:Cancel()
+	end
+
+	isCurrentlyTeleporting = true
+	local currentPos = hrp.Position
+	
+	-- Calculate how far down we can go in 4 seconds based on teleport speed
+	local downDistance = teleportSpeed * 4
+	local targetPos = Vector3.new(currentPos.X, currentPos.Y - downDistance, currentPos.Z)
+	
+	local cfr = CFrame.new(targetPos) * (hrp.CFrame - currentPos)
+	currentTween = TweenService:Create(
+		hrp,
+		TweenInfo.new(4, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+		{ CFrame = cfr }
+	)
+
+	currentTween:Play()
+	currentTween.Completed:Connect(function()
+		isCurrentlyTeleporting = false
+		currentTween = nil
+		-- After the 4-second tween, the player will naturally drop due to gravity
+		-- No additional ground checking or forced dropping
+	end)
+end
+
+-- CANCEL TWEEN
+local function cancelTween()
+	if currentTween then
+		currentTween:Cancel()
+		currentTween = nil
+		isCurrentlyTeleporting = false
+	end
+end
+
+-- ORIGINAL TELEPORT TO BASE (unchanged)
+local function computePathTo(targetPos)
+	local character = getCharacter()
+	local hrp = character:FindFirstChild('HumanoidRootPart')
+	if not hrp then
+		return nil
+	end
+
+	local path = PathfindingService:CreatePath({
+		AgentRadius = 2,
+		AgentHeight = 5,
+		AgentCanJump = true,
+		Costs = {
+			NonPathableMaterial = math.huge,
+			InvisibleWalls = math.huge,
+			LaserHitbox = math.huge,
+		},
+	})
+
+	local success, errorMsg = pcall(function()
+		path:ComputeAsync(hrp.Position, targetPos)
+	end)
+
+	if not success or path.Status ~= Enum.PathStatus.Success then
+		return nil
+	end
+
+	return path:GetWaypoints()
+end
+
+local function tweenToPath(waypoints, speed)
+	local character = getCharacter()
+	local hrp = character:FindFirstChild('HumanoidRootPart')
+	if not hrp then
+		return
+	end
+
+	isCurrentlyTeleporting = true
+
+	for _, waypoint in ipairs(waypoints) do
+		local plrpos = hrp.Position
+		local tppos = waypoint.Position
+		local tpposAdjusted = (tppos - Vector3.new(0, tppos.Y, 0))
+			+ Vector3.new(0, plrpos.Y, 0)
+		local distance = (tpposAdjusted - plrpos).Magnitude
+		local t = distance / speed
+		local cfr = CFrame.new(tpposAdjusted) * (hrp.CFrame - plrpos)
+		local tween = TweenService:Create(
+			hrp,
+			TweenInfo.new(t, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+			{ CFrame = cfr }
+		)
+		tween:Play()
+		tween.Completed:Wait()
+		checkAndDropToGround()
+	end
+
+	isCurrentlyTeleporting = false
+end
+
+local function teleportToBase()
+	local plot = findPlayerPlot()
+	if not plot then
+		return
+	end
+
+	local purchases = plot:FindFirstChild('Purchases')
+	if not purchases then
+		return
+	end
+
+	local plotBlock = purchases:FindFirstChild('PlotBlock')
+	if not plotBlock then
+		return
+	end
+
+	local hitbox = plotBlock:FindFirstChild('Hitbox')
+	if not hitbox then
+		return
+	end
+
+	local waypoints = computePathTo(hitbox.Position)
+	if waypoints then
+		tweenToPath(waypoints, teleportSpeed)
+	end
+end
+
+-- Keybind for teleport to base (G key)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.G then
+		teleportToBase()
+	end
+end)
+
+-- Export functions for Rayfield to use
+return {
+	teleportToSky = teleportToSky,
+	tweenDown = tweenDown,
+	cancelTween = cancelTween,
+	teleportToBase = teleportToBase,
+	setGroundCheckEnabled = function(enabled)
+		groundCheckEnabled = enabled
+	end,
+	getGroundCheckEnabled = function()
+		return groundCheckEnabled
+	end
+}
