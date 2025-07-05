@@ -2,7 +2,7 @@
 -- Main script to be hosted on GitHub
 
 -- Variables
-local teleportSpeed = 16 -- Default speed
+local teleportSpeed = 48 -- Default speed
 local groundCheckEnabled = true -- Enable/disable ground checking
 local maxDropHeight = 100 -- Maximum height to consider "in air"
 local safeZoneTolerance = 15 -- Tolerance for safe zone detection
