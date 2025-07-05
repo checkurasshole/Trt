@@ -1,5 +1,5 @@
 -- ComboChronicle Vault Teleport Script
--- Main functionality script
+-- Main functionality script for GitHub
 
 -- Variables
 local teleportSpeed = 49
@@ -138,7 +138,7 @@ local function checkAndDropToGround()
 	end
 end
 
--- SKY TELEPORT - Goes straight up to sky height
+-- INSTANT SKY TELEPORT - Goes straight up to sky height instantly
 local function teleportToSky()
 	local character = getCharacter()
 	local hrp = character:FindFirstChild('HumanoidRootPart')
@@ -153,13 +153,11 @@ local function teleportToSky()
 	isCurrentlyTeleporting = true
 	local currentPos = hrp.Position
 	local skyPos = Vector3.new(currentPos.X, SKY_HEIGHT, currentPos.Z)
-	local distance = (skyPos - currentPos).Magnitude
-	local t = distance / teleportSpeed
 
 	local cfr = CFrame.new(skyPos) * (hrp.CFrame - currentPos)
 	currentTween = TweenService:Create(
 		hrp,
-		TweenInfo.new(t, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+		TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{ CFrame = cfr }
 	)
 
@@ -170,8 +168,8 @@ local function teleportToSky()
 	end)
 end
 
--- TWEEN DOWN - Tweens down for 4 seconds then lets you drop
-local function tweenDown()
+-- INSTANT TELEPORT DOWN - No more 4 second bullshit
+local function teleportDown()
 	local character = getCharacter()
 	local hrp = character:FindFirstChild('HumanoidRootPart')
 	if not hrp then
@@ -185,14 +183,28 @@ local function tweenDown()
 	isCurrentlyTeleporting = true
 	local currentPos = hrp.Position
 	
-	-- Calculate how far down we can go in 4 seconds based on teleport speed
-	local downDistance = teleportSpeed * 4
-	local targetPos = Vector3.new(currentPos.X, currentPos.Y - downDistance, currentPos.Z)
+	-- Find the closest ground reference point
+	local closestRefPoint = groundReferencePoints[1]
+	local closestDistance = math.huge
+
+	for _, refPoint in ipairs(groundReferencePoints) do
+		local distance = (
+			Vector3.new(currentPos.X, 0, currentPos.Z)
+			- Vector3.new(refPoint.X, 0, refPoint.Z)
+		).Magnitude
+		if distance < closestDistance then
+			closestDistance = distance
+			closestRefPoint = refPoint
+		end
+	end
 	
-	local cfr = CFrame.new(targetPos) * (hrp.CFrame - currentPos)
+	-- Teleport to ground level instantly with a very short tween (0.3 seconds max)
+	local groundPos = Vector3.new(currentPos.X, closestRefPoint.Y + 5, currentPos.Z)
+	local cfr = CFrame.new(groundPos) * (hrp.CFrame - currentPos)
+	
 	currentTween = TweenService:Create(
 		hrp,
-		TweenInfo.new(4, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+		TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{ CFrame = cfr }
 	)
 
@@ -200,8 +212,6 @@ local function tweenDown()
 	currentTween.Completed:Connect(function()
 		isCurrentlyTeleporting = false
 		currentTween = nil
-		-- After the 4-second tween, the player will naturally drop due to gravity
-		-- No additional ground checking or forced dropping
 	end)
 end
 
@@ -312,12 +322,10 @@ local function teleportToBase()
 	end
 end
 
--- Keybind removed to prevent script conflicts
-
 -- Export functions for Rayfield to use
-return {
+_G.VaultTeleportFunctions = {
 	teleportToSky = teleportToSky,
-	tweenDown = tweenDown,
+	teleportDown = teleportDown,
 	cancelTween = cancelTween,
 	teleportToBase = teleportToBase,
 	setGroundCheckEnabled = function(enabled)
