@@ -42,4 +42,132 @@ end
   
 enableAntiVoid()
 
+local player = game.Players.LocalPlayer
+local gui = Instance.new("ScreenGui")
+gui.Name = "CopyKeyGUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local link = "https://chronicle-secure-admin-dashboard-kappa.vercel.app/"
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 320, 0, 120)
+frame.Position = UDim2.new(0.5, -160, 0.3, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+local uiCorner = Instance.new("UICorner", frame)
+uiCorner.CornerRadius = UDim.new(0, 8)
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1, -40, 0, 30)
+title.Position = UDim2.new(0, 10, 0, 8)
+title.BackgroundTransparency = 1
+title.Text = "Get Key"
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+local closeBtn = Instance.new("TextButton", frame)
+closeBtn.Size = UDim2.new(0, 24, 0, 24)
+closeBtn.Position = UDim2.new(1, -34, 0, 8)
+closeBtn.BackgroundTransparency = 0
+closeBtn.BackgroundColor3 = Color3.fromRGB(200,50,50)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.AutoButtonColor = true
+local closeCorner = Instance.new("UICorner", closeBtn)
+closeCorner.CornerRadius = UDim.new(0,6)
+
+local info = Instance.new("TextLabel", frame)
+info.Size = UDim2.new(1, -20, 0, 44)
+info.Position = UDim2.new(0, 10, 0, 40)
+info.BackgroundTransparency = 1
+info.Text = "Copy this link to get the key:\n" .. link
+info.TextColor3 = Color3.fromRGB(230,230,230)
+info.Font = Enum.Font.Gotham
+info.TextSize = 14
+info.TextWrapped = true
+info.TextXAlignment = Enum.TextXAlignment.Left
+info.TextYAlignment = Enum.TextYAlignment.Top
+
+local copyBtn = Instance.new("TextButton", frame)
+copyBtn.Size = UDim2.new(0, 120, 0, 28)
+copyBtn.Position = UDim2.new(1, -140, 1, -38)
+copyBtn.BackgroundColor3 = Color3.fromRGB(50,150,255)
+copyBtn.Text = "Copy Link"
+copyBtn.TextColor3 = Color3.fromRGB(255,255,255)
+copyBtn.Font = Enum.Font.GothamBold
+copyBtn.TextSize = 14
+local copyCorner = Instance.new("UICorner", copyBtn)
+copyCorner.CornerRadius = UDim.new(0,6)
+
+local status = Instance.new("TextLabel", frame)
+status.Size = UDim2.new(0, 120, 0, 18)
+status.Position = UDim2.new(0, 10, 1, -28)
+status.BackgroundTransparency = 1
+status.Text = ""
+status.TextColor3 = Color3.fromRGB(160,160,160)
+status.Font = Enum.Font.Gotham
+status.TextSize = 12
+status.TextWrapped = true
+
+-- Copy behavior (works in executors that provide setclipboard)
+copyBtn.MouseButton1Click:Connect(function()
+	local ok, err = pcall(function()
+		setclipboard(link)
+	end)
+	if ok then
+		status.Text = "Link copied to clipboard!"
+	else
+		status.Text = "Unable to access clipboard. Copy manually."
+		-- Selectable label fallback for manual copy
+		info.Text = "Copy this link to get the key:\n" .. link
+	end
+	-- clear status after short delay
+	task.delay(2, function()
+		if status and status.Parent then
+			status.Text = ""
+		end
+	end)
+end)
+
+-- Close behavior
+closeBtn.MouseButton1Click:Connect(function()
+	gui:Destroy()
+end)
+
+-- Draggable
+local dragging, dragInput, dragStart, startPos
+frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = frame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+frame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		local delta = input.Position - dragStart
+		frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+
+
 loadstring(game:HttpGet("https://raw.githubusercontent.com/checkurasshole/Script/refs/heads/main/IQ"))()
