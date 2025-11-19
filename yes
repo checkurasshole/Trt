@@ -1,0 +1,508 @@
+local Module = {}
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+Module.aimbotV1Enabled = false
+Module.aimbotV2Enabled = false
+Module.fovRadiusV1 = 200
+Module.fovRadiusV2 = 100
+Module.aimPartV1 = "Head"
+Module.aimPartV2 = "Head"
+Module.smoothingFactorV1 = 5
+Module.smoothingFactorV2 = 5
+Module.wallCheckV1 = true
+Module.wallCheckV2 = false
+
+Module.currentTargetV1 = nil
+Module.currentTargetV2 = nil
+Module.aimbotV1Connection = nil
+Module.aimbotV2Connection = nil
+Module.triggerConnection = nil
+Module.fovCircleV1 = nil
+Module.fovCircleV2 = nil
+Module.espObjects = {}
+Module.tracerObjects = {}
+Module.connections = {}
+Module.rainbowHue = 0
+Module.autoPlayEnabled = false
+Module.playTimes = {}
+
+function Module.firePlayCommand()
+    local currentTime = tick()
+    
+    table.insert(Module.playTimes, currentTime)
+    
+    if #Module.playTimes > 5 then
+        table.remove(Module.playTimes, 1)
+    end
+    
+    if #Module.playTimes >= 3 then
+        local timeDiff = Module.playTimes[#Module.playTimes] - Module.playTimes[1]
+        
+        if timeDiff < 3 then
+            Module.Library:Notify("Spam detected! Disabling for 3 seconds...", 3)
+            Module.autoPlayEnabled = false
+            Module.Toggles.AutoPlay:SetValue(false)
+            
+            task.wait(3)
+            
+            Module.autoPlayEnabled = true
+            Module.Toggles.AutoPlay:SetValue(true)
+            Module.playTimes = {}
+            Module.Library:Notify("Auto play re-enabled!", 2)
+            return
+        end
+    end
+    
+    local args = { "Play" }
+    game:GetService("ReplicatedStorage")
+        :WaitForChild("Remotes")
+        :WaitForChild("Command")
+        :FireServer(unpack(args))
+end
+
+function Module.hookAutoPlay(char)
+    local hum = char:WaitForChild("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local fired = false
+    
+    local function trigger()
+        if Module.autoPlayEnabled and not fired then
+            fired = true
+            Module.firePlayCommand()
+        end
+    end
+    
+    hum.Died:Connect(trigger)
+    
+    hum.HealthChanged:Connect(function(h)
+        if h <= 0 then
+            trigger()
+        end
+    end)
+    
+    if hrp then
+        hrp.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then
+                trigger()
+            end
+        end)
+    end
+    
+    char.AncestryChanged:Connect(function(_, parent)
+        if parent == nil then
+            trigger()
+        end
+    end)
+    
+    hum.AncestryChanged:Connect(function(_, parent)
+        if parent == nil then
+            trigger()
+        end
+    end)
+end
+
+function Module.isAlive(player)
+    if not player or not player.Character then return false end
+    local humanoid = player.Character:FindFirstChild("Humanoid")
+    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+    return humanoid and hrp and humanoid.Health > 0
+end
+
+function Module.worldToScreen(position)
+    local screenPos, onScreen = Camera:WorldToViewportPoint(position)
+    return Vector2.new(screenPos.X, screenPos.Y), onScreen, screenPos.Z
+end
+
+function Module.getRainbowColor()
+    return Color3.fromHSV(Module.rainbowHue, 1, 1)
+end
+
+function Module.canSeeTarget(targetCharacter, aimPart)
+    if not targetCharacter then return false end
+    local targetPart = targetCharacter:FindFirstChild(aimPart) or targetCharacter:FindFirstChild("HumanoidRootPart")
+    if not targetPart then return false end
+    
+    local localChar = LocalPlayer.Character
+    if not localChar then return false end
+    local localRoot = localChar:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return false end
+    
+    local ignoreList = {localChar, targetCharacter, Camera}
+    
+    local ray = Ray.new(localRoot.Position, (targetPart.Position - localRoot.Position).Unit * (targetPart.Position - localRoot.Position).Magnitude)
+    local hit, position = Workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    
+    return hit == nil or hit:IsDescendantOf(targetCharacter)
+end
+
+function Module.getDistanceV1(player)
+    if not Module.isAlive(player) then return math.huge end
+    local character = player.Character
+    local targetPart = character:FindFirstChild(Module.aimPartV1)
+    if not targetPart then return math.huge end
+    
+    if Module.wallCheckV1 then
+        if not Module.canSeeTarget(character, Module.aimPartV1) then
+            return math.huge
+        end
+    end
+    
+    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+    if not onScreen then return math.huge end
+    
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    return (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+end
+
+function Module.getClosestPlayerV1()
+    local closestPlayer = nil
+    local shortestDistance = Module.fovRadiusV1
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local distance = Module.getDistanceV1(player)
+            if distance < shortestDistance then
+                shortestDistance = distance
+                closestPlayer = player
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
+function Module.aimAtV1(player)
+    if not player or not Module.isAlive(player) then return end
+    
+    local character = player.Character
+    local targetPart = character:FindFirstChild(Module.aimPartV1)
+    
+    if targetPart then
+        local targetPos = targetPart.Position
+        local currentCFrame = Camera.CFrame
+        local targetCFrame = CFrame.new(currentCFrame.Position, targetPos)
+        
+        local alpha = math.clamp(1 / Module.smoothingFactorV1, 0, 1)
+        Camera.CFrame = currentCFrame:Lerp(targetCFrame, alpha)
+    end
+end
+
+function Module.getClosestEnemyTargetV2()
+    local closestDistance = Module.fovRadiusV2
+    local closestPlayer = nil
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and Module.isAlive(player) then
+            local targetPart = player.Character:FindFirstChild(Module.aimPartV2)
+            if targetPart then
+                if Module.wallCheckV2 and not Module.canSeeTarget(player.Character, Module.aimPartV2) then
+                    continue
+                end
+                
+                local screenPosition, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+
+                if onScreen then
+                    local distance = (Vector2.new(screenPosition.X, screenPosition.Y) - Vector2.new(Mouse.X, Mouse.Y)).Magnitude
+                    if distance < closestDistance then
+                        closestDistance = distance
+                        closestPlayer = targetPart
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+function Module.aimAtTargetV2(target)
+    if target then
+        local targetPosition = target.Position
+        local currentCFrame = Camera.CFrame
+        local targetCFrame = CFrame.new(currentCFrame.Position, targetPosition)
+        
+        local alpha = math.clamp(1 / Module.smoothingFactorV2, 0, 1)
+        Camera.CFrame = currentCFrame:Lerp(targetCFrame, alpha)
+    end
+end
+
+function Module.aimbotV2Loop()
+    while task.wait() do
+        if Module.aimbotV2Enabled then
+            local target = Module.getClosestEnemyTargetV2()
+            if target then
+                Module.aimAtTargetV2(target)
+                Module.currentTargetV2 = target
+            else
+                Module.currentTargetV2 = nil
+            end
+        end
+    end
+end
+
+function Module.adjustHitbox(character)
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        local rootPart = character.HumanoidRootPart
+        rootPart.Size = Vector3.new(Module.Options.HitboxSize.Value, Module.Options.HitboxSize.Value, Module.Options.HitboxSize.Value)
+        rootPart.Transparency = Module.Options.HitboxTransparency.Value
+        rootPart.CanCollide = false
+    end
+end
+
+function Module.createESP(player)
+    if player == LocalPlayer then return end
+    if Module.espObjects[player] then return end
+    
+    local char = player.Character
+    if not char then return end
+    
+    Module.espObjects[player] = {}
+    
+    if Module.Toggles.BoxESP and Module.Toggles.BoxESP.Value then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "ESP_Highlight"
+        highlight.Adornee = char
+        highlight.FillTransparency = 0.7
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = char
+        Module.espObjects[player].highlight = highlight
+    end
+    
+    if Module.Toggles.NameESP and Module.Toggles.NameESP.Value then
+        local head = char:FindFirstChild("Head")
+        if head then
+            local billboard = Instance.new("BillboardGui")
+            billboard.Name = "ESP_Name"
+            billboard.Parent = head
+            billboard.Adornee = head
+            billboard.Size = UDim2.new(0, 200, 0, 50)
+            billboard.StudsOffset = Vector3.new(0, 2, 0)
+            billboard.AlwaysOnTop = true
+            
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Parent = billboard
+            nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.Text = player.Name
+            nameLabel.TextScaled = true
+            nameLabel.Font = Enum.Font.GothamBold
+            nameLabel.TextStrokeTransparency = 0.5
+            
+            local distLabel = Instance.new("TextLabel")
+            distLabel.Parent = billboard
+            distLabel.Size = UDim2.new(1, 0, 0.5, 0)
+            distLabel.Position = UDim2.new(0, 0, 0.5, 0)
+            distLabel.BackgroundTransparency = 1
+            distLabel.TextScaled = true
+            distLabel.Font = Enum.Font.Gotham
+            distLabel.TextStrokeTransparency = 0.5
+            
+            Module.espObjects[player].billboard = billboard
+            Module.espObjects[player].nameLabel = nameLabel
+            Module.espObjects[player].distLabel = distLabel
+        end
+    end
+    
+    if Module.Toggles.HealthBar and Module.Toggles.HealthBar.Value then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local billboard = Instance.new("BillboardGui")
+            billboard.Name = "ESP_Health"
+            billboard.Parent = hrp
+            billboard.Adornee = hrp
+            billboard.Size = UDim2.new(0, 4, 5, 0)
+            billboard.StudsOffset = Vector3.new(-2.5, 0, 0)
+            billboard.AlwaysOnTop = true
+            
+            local bg = Instance.new("Frame")
+            bg.Parent = billboard
+            bg.Size = UDim2.new(1, 0, 1, 0)
+            bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            bg.BorderSizePixel = 2
+            bg.BorderColor3 = Color3.fromRGB(255, 255, 255)
+            
+            local bar = Instance.new("Frame")
+            bar.Parent = bg
+            bar.Size = UDim2.new(1, 0, 1, 0)
+            bar.Position = UDim2.new(0, 0, 1, 0)
+            bar.AnchorPoint = Vector2.new(0, 1)
+            bar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+            bar.BorderSizePixel = 0
+            
+            Module.espObjects[player].healthBar = bar
+            Module.espObjects[player].healthBG = bg
+        end
+    end
+end
+
+function Module.updateESP(player)
+    if not Module.espObjects[player] then return end
+    if not Module.isAlive(player) then
+        Module.removeESP(player)
+        return
+    end
+    
+    local useRainbow = Module.Toggles.RainbowESP and Module.Toggles.RainbowESP.Value
+    local color = useRainbow and Module.getRainbowColor() or Color3.fromRGB(255, 85, 85)
+    local char = player.Character
+    
+    if Module.espObjects[player].highlight then
+        Module.espObjects[player].highlight.FillColor = color
+        Module.espObjects[player].highlight.OutlineColor = color
+    end
+    
+    if Module.espObjects[player].nameLabel then
+        Module.espObjects[player].nameLabel.TextColor3 = color
+    end
+    
+    if Module.espObjects[player].distLabel then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local localHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp and localHrp then
+            local dist = (hrp.Position - localHrp.Position).Magnitude
+            Module.espObjects[player].distLabel.Text = string.format("[%d studs]", math.floor(dist))
+            Module.espObjects[player].distLabel.TextColor3 = color
+        end
+    end
+    
+    if Module.espObjects[player].healthBar then
+        local humanoid = char:FindFirstChild("Humanoid")
+        if humanoid then
+            local healthPercent = humanoid.Health / humanoid.MaxHealth
+            Module.espObjects[player].healthBar.Size = UDim2.new(1, 0, healthPercent, 0)
+            
+            if healthPercent > 0.5 then
+                Module.espObjects[player].healthBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+            elseif healthPercent > 0.25 then
+                Module.espObjects[player].healthBar.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+            else
+                Module.espObjects[player].healthBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+            end
+        end
+    end
+end
+
+function Module.removeESP(player)
+    if Module.espObjects[player] then
+        if Module.espObjects[player].highlight then Module.espObjects[player].highlight:Destroy() end
+        if Module.espObjects[player].billboard then Module.espObjects[player].billboard:Destroy() end
+        if Module.espObjects[player].healthBG then Module.espObjects[player].healthBG:Destroy() end
+        Module.espObjects[player] = nil
+    end
+end
+
+function Module.espUpdateLoop()
+    while task.wait(0.1) do
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and Module.isAlive(player) then
+                if Module.Toggles.BoxESP.Value or Module.Toggles.NameESP.Value or Module.Toggles.HealthBar.Value then
+                    if not Module.espObjects[player] then
+                        Module.createESP(player)
+                    end
+                    Module.updateESP(player)
+                else
+                    Module.removeESP(player)
+                end
+            end
+        end
+    end
+end
+
+function Module.initializeAllESP()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and Module.isAlive(player) then
+            Module.removeESP(player)
+            task.wait(0.05)
+            Module.createESP(player)
+        end
+    end
+end
+
+function Module.Initialize(Library, Options, Toggles)
+    Module.Library = Library
+    Module.Options = Options
+    Module.Toggles = Toggles
+    
+    if LocalPlayer.Character then
+        Module.hookAutoPlay(LocalPlayer.Character)
+    end
+    
+    LocalPlayer.CharacterAdded:Connect(Module.hookAutoPlay)
+    
+    task.spawn(Module.aimbotV2Loop)
+    
+    task.spawn(function()
+        while task.wait(0.05) do
+            Module.rainbowHue = (Module.rainbowHue + 0.01) % 1
+        end
+    end)
+    
+    Players.PlayerRemoving:Connect(function(player)
+        Module.removeESP(player)
+        if Module.tracerObjects[player] then
+            Module.tracerObjects[player]:Remove()
+            Module.tracerObjects[player] = nil
+        end
+    end)
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            player.CharacterAdded:Connect(function()
+                task.wait(0.5)
+                Module.removeESP(player)
+            end)
+        end
+    end
+    
+    Players.PlayerAdded:Connect(function(player)
+        player.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            Module.removeESP(player)
+        end)
+    end)
+end
+
+function Module.Cleanup()
+    Module.aimbotV1Enabled = false
+    Module.aimbotV2Enabled = false
+    if Module.aimbotV1Connection then Module.aimbotV1Connection:Disconnect() end
+    if Module.aimbotV2Connection then Module.aimbotV2Connection:Disconnect() end
+    if Module.triggerConnection then Module.triggerConnection:Disconnect() end
+    if Module.fovCircleV1 then Module.fovCircleV1:Remove() end
+    if Module.fovCircleV2 then Module.fovCircleV2:Remove() end
+    if Module.tracerConnection then Module.tracerConnection:Disconnect() end
+    
+    for _, connection in pairs(Module.connections) do
+        if connection and typeof(connection) == "RBXScriptConnection" then
+            connection:Disconnect()
+        end
+    end
+    
+    for player, _ in pairs(Module.espObjects) do
+        Module.removeESP(player)
+    end
+    
+    for player, line in pairs(Module.tracerObjects) do
+        if line then line:Remove() end
+    end
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local rootPart = player.Character.HumanoidRootPart
+            rootPart.Size = Vector3.new(2, 2, 1)
+            rootPart.Transparency = 0
+            rootPart.CanCollide = true
+        end
+    end
+end
+
+return Module
