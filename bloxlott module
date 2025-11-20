@@ -1,0 +1,670 @@
+local Module = {}
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Character Helper Functions
+function Module.GetCharacter()
+    return LocalPlayer.Character
+end
+
+function Module.GetHumanoid()
+    local char = Module.GetCharacter()
+    return char and char:FindFirstChild("Humanoid")
+end
+
+function Module.GetRootPart()
+    local char = Module.GetCharacter()
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+function Module.GetEquippedTool()
+    local char = Module.GetCharacter()
+    return char and char:FindFirstChildOfClass("Tool")
+end
+
+-- No Sword Cooldown System
+Module.nsc = {
+    enabled = false,
+    task = nil,
+    addCdSet = {},
+    conns = {}
+}
+
+local function nsc_disconnectAll()
+    for _,c in ipairs(Module.nsc.conns) do pcall(function() c:Disconnect() end) end
+    Module.nsc.conns = {}
+end
+
+local function nsc_tryRegister(container)
+    local functions = container and container:FindFirstChild("Functions")
+    if not functions then return end
+    local addcd = functions:FindFirstChild("AddCD")
+    if addcd and addcd:IsA("BindableFunction") and not Module.nsc.addCdSet[addcd] then
+        Module.nsc.addCdSet[addcd] = true
+    end
+end
+
+function Module.nsc_start()
+    if Module.nsc.task then task.cancel(Module.nsc.task) Module.nsc.task = nil end
+    table.clear(Module.nsc.addCdSet)
+    nsc_disconnectAll()
+
+    local actorsFolder = LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("Runtime"):WaitForChild("Actors")
+
+    for _, child in ipairs(actorsFolder:GetChildren()) do
+        nsc_tryRegister(child)
+    end
+
+    table.insert(Module.nsc.conns, actorsFolder.ChildAdded:Connect(function(ch)
+        task.defer(nsc_tryRegister, ch)
+    end))
+    table.insert(Module.nsc.conns, actorsFolder.DescendantAdded:Connect(function(ch)
+        if ch.Name == "Functions" or ch.Name == "AddCD" then
+            local model = ch:FindFirstAncestorWhichIsA("Folder") or ch.Parent
+            if model then nsc_tryRegister(model) end
+        end
+    end))
+    table.insert(Module.nsc.conns, actorsFolder.DescendantRemoving:Connect(function(inst)
+        if inst.Name == "AddCD" and Module.nsc.addCdSet[inst] then
+            Module.nsc.addCdSet[inst] = nil
+        end
+    end))
+
+    Module.nsc.task = task.spawn(function()
+        while Module.nsc.enabled do
+            for addcd,_ in pairs(Module.nsc.addCdSet) do
+                if addcd and addcd.Parent then
+                    pcall(function()
+                        addcd:Invoke("CommonWeapon", 0.001)
+                    end)
+                else
+                    Module.nsc.addCdSet[addcd] = nil
+                end
+            end
+            task.wait(0.1)
+        end
+    end)
+end
+
+function Module.nsc_stop()
+    Module.nsc.enabled = false
+    if Module.nsc.task then task.cancel(Module.nsc.task) Module.nsc.task = nil end
+    nsc_disconnectAll()
+    table.clear(Module.nsc.addCdSet)
+end
+
+-- Enemy/NPC Functions
+function Module.GetEnemyList()
+    local enemyList = {}
+    for _, enemy in pairs(workspace:GetChildren()) do
+        if enemy:FindFirstChild("Humanoid") and enemy:FindFirstChild("ActorId") then
+            table.insert(enemyList, enemy.Name)
+        end
+    end
+    return enemyList
+end
+
+function Module.TeleportToEnemy(targetName)
+    for _, enemy in pairs(workspace:GetChildren()) do
+        if enemy.Name == targetName and enemy:FindFirstChild("HumanoidRootPart") then
+            local root = Module.GetRootPart()
+            if root then
+                root.CFrame = enemy.HumanoidRootPart.CFrame * CFrame.new(0, 0, 5)
+            end
+            break
+        end
+    end
+end
+
+-- Inventory Functions
+function Module.getActorId()
+    local a = LocalPlayer:FindFirstChild("ActorId")
+    if a and a:IsA("StringValue") then
+        return a.Value
+    end
+    return nil
+end
+
+function Module.getActorFolder()
+    local id = Module.getActorId()
+    if not id then return nil end
+    local rt = ReplicatedStorage:FindFirstChild("Runtime")
+    if not rt then return nil end
+    local actors = rt:FindFirstChild("Actors")
+    if not actors then return nil end
+    return actors:FindFirstChild(id)
+end
+
+function Module.RemoveAllItems()
+    local folder = Module.getActorFolder()
+    if not folder then return false, "Hindi mahanap ang Actor folder" end
+    
+    local remote = folder:FindFirstChild("Functions")
+    if not remote then return false, "Hindi mahanap ang Functions" end
+    
+    local r = remote:FindFirstChild("RemoveItemWithSlotInfo")
+    if not r then return false, "Hindi mahanap ang RemoveItemWithSlotInfo" end
+    
+    for slot = 1, 30 do
+        pcall(function()
+            r:InvokeServer("BagSlots", slot)
+        end)
+    end
+    
+    return true, "Tinanggal ang mga item"
+end
+
+-- Rebirth Functions
+function Module.DoRebirth()
+    for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
+        if remote:IsA("RemoteFunction") and (remote.Name == "Rebirth" or remote.Name == "DoRebirth") then
+            pcall(function() remote:InvokeServer() end)
+        end
+    end
+end
+
+-- Server Hop Function
+function Module.ServerHop()
+    local PlaceId = game.PlaceId
+    local servers = {}
+    
+    pcall(function()
+        local cursor = ""
+        repeat
+            local success, result = pcall(function()
+                return game:GetService("HttpService"):JSONDecode(game:HttpGet(
+                    "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100" .. 
+                    (cursor ~= "" and "&cursor=" .. cursor or "")
+                ))
+            end)
+            
+            if success and result.data then
+                for _, server in ipairs(result.data) do
+                    if server.id ~= game.JobId and server.playing < server.maxPlayers then
+                        table.insert(servers, server.id)
+                    end
+                end
+                cursor = result.nextPageCursor or ""
+            else
+                break
+            end
+        until cursor == "" or #servers >= 10
+    end)
+    
+    if #servers > 0 then
+        local randomServer = servers[math.random(1, #servers)]
+        TeleportService:TeleportToPlaceInstance(PlaceId, randomServer, LocalPlayer)
+        return true
+    else
+        return false
+    end
+end
+
+-- Hitbox System
+Module.hitbox = {
+    enabled = false,
+    size = 1,
+    originalProperties = {}
+}
+
+function Module.updateHitboxSize(size)
+    if workspace:FindFirstChild("Runtime") and workspace.Runtime:FindFirstChild("Enemies") then
+        for _, enemy in pairs(workspace.Runtime.Enemies:GetChildren()) do
+            local rootPart = enemy:FindFirstChild("HumanoidRootPart")
+            if rootPart then
+                if not Module.hitbox.originalProperties[rootPart] then
+                    Module.hitbox.originalProperties[rootPart] = {
+                        Size = rootPart.Size,
+                        Transparency = rootPart.Transparency,
+                        Color = rootPart.Color,
+                        Material = rootPart.Material
+                    }
+                end
+                
+                rootPart.Size = Vector3.new(size, size, size)
+                rootPart.Transparency = 0.7
+                rootPart.Color = Color3.fromRGB(0, 255, 0)
+                rootPart.Material = Enum.Material.ForceField
+                rootPart.CanCollide = false
+            end
+        end
+    end
+end
+
+function Module.ResetHitbox()
+    Module.hitbox.enabled = false
+    
+    for part, props in pairs(Module.hitbox.originalProperties) do
+        if part and part.Parent then
+            part.Size = props.Size
+            part.Transparency = props.Transparency
+            part.Color = props.Color
+            part.Material = props.Material
+        end
+    end
+    Module.hitbox.originalProperties = {}
+end
+
+function Module.SetupHitboxMonitor()
+    if workspace:FindFirstChild("Runtime") and workspace.Runtime:FindFirstChild("Enemies") then
+        workspace.Runtime.Enemies.ChildAdded:Connect(function(enemy)
+            if Module.hitbox.enabled then
+                task.wait(0.1)
+                
+                local rootPart = enemy:FindFirstChild("HumanoidRootPart")
+                if rootPart then
+                    if not Module.hitbox.originalProperties[rootPart] then
+                        Module.hitbox.originalProperties[rootPart] = {
+                            Size = rootPart.Size,
+                            Transparency = rootPart.Transparency,
+                            Color = rootPart.Color,
+                            Material = rootPart.Material
+                        }
+                    end
+                    
+                    rootPart.Size = Vector3.new(Module.hitbox.size, Module.hitbox.size, Module.hitbox.size)
+                    rootPart.Transparency = 0.7
+                    rootPart.Color = Color3.fromRGB(0, 255, 0)
+                    rootPart.Material = Enum.Material.ForceField
+                    rootPart.CanCollide = false
+                end
+            end
+        end)
+    end
+end
+
+-- Anchor Teleportation System
+Module.anchor = {
+    enabled = false,
+    distance = 5,
+    flySpeed = 31,
+    selectedDisplayName = nil,
+    npcGroups = {},
+    connection = nil,
+    position = "Sa Harap",
+    safetyPlatform = nil,
+    paused = false
+}
+
+local function getNextNPC(displayName)
+    if not Module.anchor.npcGroups[displayName] then return nil end
+    
+    for _, npc in ipairs(Module.anchor.npcGroups[displayName]) do
+        if npc and npc.Parent then
+            local humanoid = npc:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                return npc
+            end
+        end
+    end
+    return nil
+end
+
+local function getAnchorOffset(npcRoot)
+    local offset = CFrame.new(0, 0, 0)
+    local halfSize = Module.hitbox.size / 2
+    
+    if Module.anchor.position == "Sa Harap" then
+        offset = CFrame.new(0, 0, halfSize + Module.anchor.distance)
+    elseif Module.anchor.position == "Sa Likod" then
+        offset = CFrame.new(0, 0, -(halfSize + Module.anchor.distance))
+    elseif Module.anchor.position == "Sa Ibabaw" then
+        offset = CFrame.new(0, halfSize + Module.anchor.distance, 0)
+    elseif Module.anchor.position == "Sa Ilalim" then
+        offset = CFrame.new(0, -(halfSize + Module.anchor.distance), 0)
+    elseif Module.anchor.position == "Kaliwang Gilid" then
+        offset = CFrame.new(-(halfSize + Module.anchor.distance), 0, 0)
+    elseif Module.anchor.position == "Kanang Gilid" then
+        offset = CFrame.new(halfSize + Module.anchor.distance, 0, 0)
+    end
+    
+    return npcRoot.CFrame * offset
+end
+
+local function createSafetyPlatform(position)
+    if Module.anchor.safetyPlatform and Module.anchor.safetyPlatform.Parent then
+        Module.anchor.safetyPlatform:Destroy()
+    end
+    
+    Module.anchor.safetyPlatform = Instance.new("Part")
+    Module.anchor.safetyPlatform.Size = Vector3.new(20, 1, 20)
+    Module.anchor.safetyPlatform.Position = position + Vector3.new(0, -3, 0)
+    Module.anchor.safetyPlatform.Anchored = true
+    Module.anchor.safetyPlatform.Transparency = 0.5
+    Module.anchor.safetyPlatform.CanCollide = true
+    Module.anchor.safetyPlatform.Material = Enum.Material.ForceField
+    Module.anchor.safetyPlatform.Color = Color3.fromRGB(100, 100, 255)
+    Module.anchor.safetyPlatform.Parent = workspace
+end
+
+local function removeSafetyPlatform()
+    if Module.anchor.safetyPlatform and Module.anchor.safetyPlatform.Parent then
+        Module.anchor.safetyPlatform:Destroy()
+        Module.anchor.safetyPlatform = nil
+    end
+end
+
+function Module.startAnchorTP()
+    if Module.anchor.connection then
+        Module.anchor.connection:Disconnect()
+    end
+    
+    if Module.anchor.selectedDisplayName and Module.anchor.enabled then
+        Module.anchor.connection = RunService.Heartbeat:Connect(function()
+            if Module.anchor.paused then return end
+            
+            local currentNPC = getNextNPC(Module.anchor.selectedDisplayName)
+            local character = Module.GetCharacter()
+            
+            if currentNPC and character then
+                removeSafetyPlatform()
+                
+                local humanoidRootPart = Module.GetRootPart()
+                local humanoid = Module.GetHumanoid()
+                local npcRoot = currentNPC:FindFirstChild("HumanoidRootPart") or currentNPC:FindFirstChild("Torso")
+                
+                if humanoidRootPart and npcRoot then
+                    for _, part in pairs(character:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                    
+                    local targetCFrame = getAnchorOffset(npcRoot)
+                    local targetPos = targetCFrame.Position
+                    local distance = (humanoidRootPart.Position - targetPos).Magnitude
+                    
+                    if distance > 2 then
+                        local moveDirection = (targetPos - humanoidRootPart.Position).Unit
+                        humanoidRootPart.AssemblyLinearVelocity = moveDirection * Module.anchor.flySpeed
+                        humanoidRootPart.CFrame = CFrame.new(humanoidRootPart.Position, npcRoot.Position)
+                        
+                        if humanoid then
+                            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+                        end
+                    else
+                        humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        humanoidRootPart.CFrame = CFrame.new(targetPos, npcRoot.Position)
+                        
+                        if humanoid then
+                            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+                        end
+                    end
+                end
+            else
+                local humanoidRootPart = Module.GetRootPart()
+                local humanoid = Module.GetHumanoid()
+                
+                if humanoidRootPart then
+                    humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    createSafetyPlatform(humanoidRootPart.Position)
+                end
+                
+                if humanoid then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+                end
+            end
+        end)
+    end
+end
+
+function Module.stopAnchorTP()
+    if Module.anchor.connection then
+        Module.anchor.connection:Disconnect()
+        Module.anchor.connection = nil
+    end
+    
+    removeSafetyPlatform()
+    
+    local character = Module.GetCharacter()
+    if character then
+        local rootPart = Module.GetRootPart()
+        local humanoid = Module.GetHumanoid()
+        
+        if rootPart then
+            rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
+        
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+        end
+        
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+    end
+end
+
+function Module.groupNPCs()
+    Module.anchor.npcGroups = {}
+    
+    if workspace:FindFirstChild("Runtime") and workspace.Runtime:FindFirstChild("Enemies") then
+        for _, enemy in pairs(workspace.Runtime.Enemies:GetChildren()) do
+            local humanoid = enemy:FindFirstChild("Humanoid")
+            if humanoid then
+                local displayName = humanoid.DisplayName or enemy.Name
+                
+                if not Module.anchor.npcGroups[displayName] then
+                    Module.anchor.npcGroups[displayName] = {}
+                end
+                
+                table.insert(Module.anchor.npcGroups[displayName], enemy)
+            end
+        end
+    end
+end
+
+function Module.getNPCList()
+    Module.groupNPCs()
+    local list = {}
+    for displayName, npcs in pairs(Module.anchor.npcGroups) do
+        table.insert(list, displayName .. " (" .. #npcs .. ")")
+    end
+    table.sort(list)
+    return list
+end
+
+-- Loot System
+Module.loot = {
+    connection = nil,
+    cooldownActive = false,
+    lastTarget = nil,
+    isLooting = false
+}
+
+local function getLootFolder()
+    local rt = workspace:FindFirstChild("Runtime")
+    return rt and rt:FindFirstChild("LootPoints") or nil
+end
+
+local function findBasePartAndPrompt(model)
+    if not model:IsA("Model") then return end
+
+    local base = model:FindFirstChild("BasePart")
+    if not base then
+        for _, d in ipairs(model:GetDescendants()) do
+            if d:IsA("BasePart") then
+                base = d
+                break
+            end
+        end
+    end
+    if not base then return end
+
+    local prompt = base:FindFirstChildOfClass("ProximityPrompt")
+    if not prompt then
+        for _, d in ipairs(base:GetDescendants()) do
+            if d:IsA("ProximityPrompt") then
+                prompt = d
+                break
+            end
+        end
+    end
+
+    return base, prompt
+end
+
+local function collectLootCandidates()
+    local folder = getLootFolder()
+    if not folder then return {} end
+
+    local char = Module.GetCharacter()
+    local hrp = Module.GetRootPart()
+    local origin = hrp and hrp.Position or Vector3.zero
+
+    local list = {}
+
+    for _, inst in ipairs(folder:GetDescendants()) do
+        if inst:IsA("Model") then
+            local base, prompt = findBasePartAndPrompt(inst)
+            if base and prompt and prompt.Enabled ~= false then
+                local dist = (base.Position - origin).Magnitude
+                table.insert(list, {
+                    model = inst,
+                    base = base,
+                    prompt = prompt,
+                    dist = dist
+                })
+            end
+        end
+    end
+
+    table.sort(list, function(a, b)
+        return a.dist < b.dist
+    end)
+
+    return list
+end
+
+function Module.startLooting(autoLootEnabled)
+    if Module.loot.connection then
+        Module.loot.connection:Disconnect()
+    end
+
+    Module.loot.connection = RunService.Heartbeat:Connect(function()
+        if not autoLootEnabled() then return end
+        if Module.loot.cooldownActive then return end
+
+        local items = collectLootCandidates()
+        
+        if #items == 0 then
+            if Module.loot.isLooting and Module.anchor.enabled then
+                Module.loot.isLooting = false
+                Module.anchor.paused = false
+            end
+            return
+        end
+
+        if Module.anchor.enabled and not Module.loot.isLooting then
+            Module.loot.isLooting = true
+            Module.anchor.paused = true
+        end
+
+        local item = items[1]
+        local char = Module.GetCharacter()
+        local hrp = Module.GetRootPart()
+        local humanoid = Module.GetHumanoid()
+
+        if hrp and humanoid and item.base.Parent and item.prompt.Parent then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+
+            local targetPos = item.base.Position + Vector3.new(0, 2, 0)
+            local distance = (hrp.Position - targetPos).Magnitude
+            local lootSpeed = 29
+
+            if distance > 2 then
+                local moveDirection = (targetPos - hrp.Position).Unit
+                hrp.AssemblyLinearVelocity = moveDirection * lootSpeed
+                hrp.CFrame = CFrame.new(hrp.Position, targetPos)
+                humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+            else
+                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                hrp.CFrame = CFrame.new(targetPos)
+                humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+
+                pcall(function()
+                    fireproximityprompt(item.prompt)
+                end)
+
+                if Module.loot.lastTarget ~= item.model then
+                    Module.loot.lastTarget = item.model
+                    Module.loot.cooldownActive = true
+                    task.delay(0.5, function()
+                        Module.loot.cooldownActive = false
+                    end)
+                end
+            end
+        end
+    end)
+end
+
+function Module.stopLooting()
+    if Module.loot.connection then
+        Module.loot.connection:Disconnect()
+        Module.loot.connection = nil
+    end
+
+    Module.loot.isLooting = false
+    Module.anchor.paused = false
+
+    local character = Module.GetCharacter()
+    if character then
+        local rootPart = Module.GetRootPart()
+        local humanoid = Module.GetHumanoid()
+        
+        if rootPart then
+            rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
+        
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+        end
+        
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+    end
+    
+    removeSafetyPlatform()
+end
+
+-- Combat System
+Module.combat = {
+    currentTarget = nil,
+    lastAttackTime = 0,
+    attackCooldown = 0.05
+}
+
+-- Lighting Functions
+function Module.RemoveFog()
+    game.Lighting.FogEnd = 100000
+end
+
+function Module.FullBright()
+    game.Lighting.Brightness = 2
+    game.Lighting.Ambient = Color3.new(1, 1, 1)
+end
+
+-- Anti-AFK
+function Module.SetupAntiAFK()
+    LocalPlayer.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+end
+
+return Module
