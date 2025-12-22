@@ -1,0 +1,45 @@
+local Module = {}
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+function Module.trainStat(value)
+    local args = {[1] = tostring(value)}
+    ReplicatedStorage:WaitForChild("Event", 9e9):WaitForChild("Train", 9e9):FireServer(unpack(args))
+end
+
+function Module.winGainStat(value)
+    local args = {[1] = tostring(value)}
+    ReplicatedStorage:WaitForChild("Event", 9e9):WaitForChild("WinGain", 9e9):FireServer(unpack(args))
+end
+
+function Module.enchanted(val1, val2)
+    local args = {[1] = val1, [2] = val2}
+    ReplicatedStorage:WaitForChild("Event", 9e9):WaitForChild("Enchanted", 9e9):FireServer(unpack(args))
+end
+
+function Module.healthAdd(value)
+    local args = {[1] = value}
+    ReplicatedStorage:WaitForChild("Event", 9e9):WaitForChild("HealthAdd", 9e9):FireServer(unpack(args))
+end
+
+function Module.rebirth(value)
+    local args = {[1] = value}
+    ReplicatedStorage:WaitForChild("Event", 9e9):WaitForChild("HealthAdd", 9e9):FireServer(unpack(args))
+end
+
+function Module.unlockWorld(world)
+    local args = {[1] = world}
+    ReplicatedStorage:WaitForChild("PEV", 9e9):WaitForChild("PTP", 9e9):FireServer(unpack(args))
+end
+
+function Module.buyPower(powerType, value)
+    local args = {[1] = powerType, [2] = value}
+    ReplicatedStorage:WaitForChild("Event", 9e9):WaitForChild("BuyPower", 9e9):FireServer(unpack(args))
+end
+
+function Module.hatchPet(type1, type2, data)
+    local args = {[1] = type1, [2] = type2, [3] = data}
+    ReplicatedStorage:WaitForChild("PEV", 9e9):WaitForChild("Hatch", 9e9):FireServer(unpack(args))
+end
+
+return Module
