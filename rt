@@ -1,0 +1,69 @@
+local Module = {}
+
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+
+Module.localPlayer = Players.LocalPlayer
+Module.itemsList = {}
+Module.activeToggles = {}
+
+function Module.finishPurchase(itemId)
+    local success, err = pcall(function()
+        MarketplaceService:SignalPromptProductPurchaseFinished(Module.localPlayer.UserId, itemId, true)
+    end)
+    
+    if not success then
+        pcall(function()
+            MarketplaceService:SignalPromptProductPurchaseFinished(Module.localPlayer, itemId, true)
+        end)
+    end
+end
+
+function Module.fetchAllItems()
+    Module.itemsList = {}
+    
+    local success, items = pcall(function()
+        return MarketplaceService:GetDeveloperProductsAsync()
+    end)
+    
+    if not success then
+        return {}
+    end
+    
+    local allItemsInfo = items:GetCurrentPage()
+    
+    for _, itemInfo in pairs(allItemsInfo) do
+        local itemData = {
+            Name = itemInfo.Name,
+            ProductId = itemInfo.ProductId,
+        }
+        table.insert(Module.itemsList, itemData)
+    end
+    
+    return Module.itemsList
+end
+
+function Module.purchaseAll(items, delay)
+    delay = delay or 0.3
+    for _, item in pairs(items) do
+        Module.finishPurchase(item.ProductId)
+        task.wait(delay)
+    end
+end
+
+function Module.startAutoPurchase(itemId, delay)
+    delay = delay or 0.1
+    Module.activeToggles[itemId] = true
+    spawn(function()
+        while Module.activeToggles[itemId] do
+            Module.finishPurchase(itemId)
+            task.wait(delay)
+        end
+    end)
+end
+
+function Module.stopAutoPurchase(itemId)
+    Module.activeToggles[itemId] = false
+end
+
+return Module
