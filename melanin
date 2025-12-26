@@ -1,0 +1,330 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Player = Players.LocalPlayer
+
+-- Load Obsidian Library
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local Options = Library.Options
+local Toggles = Library.Toggles
+
+-- Create Window
+local Window = Library:CreateWindow({
+    Title = "COMBO_WICK",
+    Footer = "version: 1.0",
+    Icon = 95816097006870,
+    NotifySide = "Right",
+    ShowCustomCursor = false,
+    Center = true,
+    AutoShow = true,
+    Size = UDim2.fromOffset(300, 150),
+})
+
+
+-- Redeem Codes
+local codes = {
+	"ALMOSTCHRISTMASEVE",
+	"ALMOSTCHRISTMASEVE2",
+	"ALMOSTCHRISTMASEVE3",
+	"ALMOSTCHRISTMASEVE4",
+    "200KLIKES",
+    "Hugecode",
+    "WDEV1",
+    "WDEV2",
+    "ALMOSTCHRISTMASEVE",
+    "ALMOSTCHRISTMASEVE2",
+    "ALMOSTCHRISTMASEVE3",
+    "ALMOSTCHRISTMASEVE4",
+    "WEAREBACK",
+    "WEAREBACK2",
+    "WEAREBACK3",
+    "WEAREBACK4",
+    "KRAMPUS",
+    "JINGLEBELLS"
+}
+
+local function redeemAllCodes()
+    task.spawn(function()
+        local success, packetsFolder = pcall(function()
+            return ReplicatedStorage:WaitForChild("Packets", 5)
+        end)
+        
+        if success and packetsFolder then
+            local redeemCode = packetsFolder:FindFirstChild("RedeemCode")
+            
+            if redeemCode then
+                Library:Notify({
+                    Title = "Code Redemption",
+                    Content = "Redeeming " .. #codes .. " codes...",
+                    Duration = 3
+                })
+                
+                local redeemed = 0
+                for _, code in ipairs(codes) do
+                    task.spawn(function()
+                        pcall(function()
+                            local args = {code}
+                            redeemCode:InvokeServer(unpack(args))
+                            redeemed = redeemed + 1
+                        end)
+                    end)
+                    task.wait(0.5)
+                end
+                
+                task.wait(1)
+                Library:Notify({
+                    Title = "Complete",
+                    Content = "Finished redeeming codes!",
+                    Duration = 3
+                })
+            else
+                Library:Notify({
+                    Title = "Error",
+                    Content = "RedeemCode remote not found",
+                    Duration = 5
+                })
+            end
+        else
+            Library:Notify({
+                Title = "Error",
+                Content = "Packets folder not found",
+                Duration = 5
+            })
+        end
+    end)
+end
+
+-- Create Tab
+local Tabs = {
+    Main = Window:AddTab("Main", "gift"),
+}
+
+-- Create Group
+local CodesGroup = Tabs.Main:AddLeftGroupbox("Code Redemption", "gift")
+
+CodesGroup:AddButton({
+    Text = "Redeem All Codes",
+    Func = function()
+        redeemAllCodes()
+    end,
+    Tooltip = "Click to redeem all available codes"
+})
+
+CodesGroup:AddLabel("Codes to redeem: " .. #codes)
+
+-- UI Settings Tab
+local SettingsTabs = Window:AddTab("UI Settings", "settings")
+local MenuGroup = SettingsTabs:AddLeftGroupbox("Menu", "wrench")
+
+MenuGroup:AddToggle("KeybindMenuOpen", {
+    Default = Library.KeybindFrame.Visible,
+    Text = "Open Keybind Menu",
+    Callback = function(value)
+        Library.KeybindFrame.Visible = value
+    end,
+})
+
+MenuGroup:AddDropdown("NotificationSide", {
+    Values = { "Left", "Right" },
+    Default = "Right",
+    Text = "Notification Side",
+    Callback = function(Value)
+        Library:SetNotifySide(Value)
+    end,
+})
+
+MenuGroup:AddDivider()
+MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
+
+MenuGroup:AddButton({
+    Text = "Unload",
+    Func = function()
+        Library:Unload()
+    end
+})
+
+Library.ToggleKeybind = Options.MenuKeybind
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+
+ThemeManager:SetFolder("COMBO_WICK")
+SaveManager:SetFolder("COMBO_WICK/configs")
+
+SaveManager:BuildConfigSection(SettingsTabs)
+ThemeManager:ApplyToTab(SettingsTabs)
+
+SaveManager:LoadAutoloadConfig()
+
+Library:OnUnload(function()
+    Library.Unloaded = true
+end)local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Player = Players.LocalPlayer
+
+-- Load Obsidian Library
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local Options = Library.Options
+local Toggles = Library.Toggles
+
+-- Create Window
+local Window = Library:CreateWindow({
+    Title = "COMBO_WICK",
+    Footer = "version: 1.0",
+    Icon = 95816097006870,
+    NotifySide = "Right",
+    ShowCustomCursor = false,
+    Center = true,
+    AutoShow = true,
+    Size = UDim2.fromOffset(300, 150),
+})
+
+-- Redeem Codes
+local codes = {
+    "200KLIKES",
+    "Hugecode",
+    "WDEV1",
+    "WDEV2",
+    "ALMOSTCHRISTMASEVE",
+    "ALMOSTCHRISTMASEVE2",
+    "ALMOSTCHRISTMASEVE3",
+    "ALMOSTCHRISTMASEVE4",
+    "WEAREBACK",
+    "WEAREBACK2",
+    "WEAREBACK3",
+    "WEAREBACK4",
+    "KRAMPUS",
+    "JINGLEBELLS"
+}
+
+local function redeemAllCodes()
+    task.spawn(function()
+        local success, packetsFolder = pcall(function()
+            return ReplicatedStorage:WaitForChild("Packets", 5)
+        end)
+        
+        if success and packetsFolder then
+            local redeemCode = packetsFolder:FindFirstChild("RedeemCode")
+            
+            if redeemCode then
+                Library:Notify({
+                    Title = "Code Redemption",
+                    Content = "Redeeming " .. #codes .. " codes...",
+                    Duration = 3
+                })
+                
+                local redeemed = 0
+                for _, code in ipairs(codes) do
+                    task.spawn(function()
+                        pcall(function()
+                            local args = {code}
+                            redeemCode:InvokeServer(unpack(args))
+                            redeemed = redeemed + 1
+                        end)
+                    end)
+                    task.wait(0.5)
+                end
+                
+                task.wait(1)
+                Library:Notify({
+                    Title = "Complete",
+                    Content = "Finished redeeming codes!",
+                    Duration = 3
+                })
+            else
+                Library:Notify({
+                    Title = "Error",
+                    Content = "RedeemCode remote not found",
+                    Duration = 5
+                })
+            end
+        else
+            Library:Notify({
+                Title = "Error",
+                Content = "Packets folder not found",
+                Duration = 5
+            })
+        end
+    end)
+end
+
+-- Create Tab
+local Tabs = {
+    Main = Window:AddTab("Main", "gift"),
+}
+
+-- Create Group
+local CodesGroup = Tabs.Main:AddLeftGroupbox("Code Redemption", "gift")
+
+CodesGroup:AddButton({
+    Text = "Redeem All Codes",
+    Func = function()
+        redeemAllCodes()
+    end,
+    Tooltip = "Click to redeem all available codes"
+})
+
+CodesGroup:AddLabel("Codes to redeem: " .. #codes)
+
+-- UI Settings Tab
+local SettingsTabs = Window:AddTab("UI Settings", "settings")
+local MenuGroup = SettingsTabs:AddLeftGroupbox("Menu", "wrench")
+
+MenuGroup:AddToggle("KeybindMenuOpen", {
+    Default = Library.KeybindFrame.Visible,
+    Text = "Open Keybind Menu",
+    Callback = function(value)
+        Library.KeybindFrame.Visible = value
+    end,
+})
+
+MenuGroup:AddDropdown("NotificationSide", {
+    Values = { "Left", "Right" },
+    Default = "Right",
+    Text = "Notification Side",
+    Callback = function(Value)
+        Library:SetNotifySide(Value)
+    end,
+})
+
+MenuGroup:AddDivider()
+MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
+
+MenuGroup:AddButton({
+    Text = "Unload",
+    Func = function()
+        Library:Unload()
+    end
+})
+
+Library.ToggleKeybind = Options.MenuKeybind
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+
+ThemeManager:SetFolder("COMBO_WICK")
+SaveManager:SetFolder("COMBO_WICK/configs")
+
+SaveManager:BuildConfigSection(SettingsTabs)
+ThemeManager:ApplyToTab(SettingsTabs)
+
+SaveManager:LoadAutoloadConfig()
+
+Library:OnUnload(function()
+    Library.Unloaded = true
+end)
