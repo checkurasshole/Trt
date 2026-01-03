@@ -55,7 +55,7 @@ local function showLanguageUnavailableNotification(requestedLang, fallbackLang)
     local notificationFrame = Instance.new("Frame")
     notificationFrame.Name = "NotificationFrame"
     notificationFrame.Size = UDim2.new(0, notificationWidth, 0, notificationHeight)
-    notificationFrame.Position = UDim2.new(1, 20, 0, 20)
+    notificationFrame.Position = UDim2.new(1, 20, 0, 140)
     notificationFrame.BackgroundColor3 = Color3.fromRGB(35, 30, 25)
     notificationFrame.BackgroundTransparency = 0.05
     notificationFrame.BorderSizePixel = 0
@@ -164,7 +164,7 @@ local function showLanguageUnavailableNotification(requestedLang, fallbackLang)
     
     local slideInTween = TweenService:Create(notificationFrame,
         TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        {Position = UDim2.new(1, -notificationWidth - 20, 0, 20)}
+        {Position = UDim2.new(1, -notificationWidth - 20, 0, 140)}
     )
     slideInTween:Play()
     
@@ -177,7 +177,7 @@ local function showLanguageUnavailableNotification(requestedLang, fallbackLang)
     local function closeNotification()
         local slideOutTween = TweenService:Create(notificationFrame,
             TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
-            {Position = UDim2.new(1, 20, 0, 20)}
+            {Position = UDim2.new(1, 20, 0, 140)}
         )
         slideOutTween:Play()
         
